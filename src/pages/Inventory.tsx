@@ -1,33 +1,37 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Search, Plus, Edit2, Trash2 } from 'lucide-react';
 import { mockProducts } from '../data/mockData';
+
 export function Inventory() {
   const [searchQuery, setSearchQuery] = useState('');
+
   const filteredProducts = mockProducts.filter((product) =>
-  product.name.toLowerCase().includes(searchQuery.toLowerCase())
+    product.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
   const getStockBadge = (stock: number) => {
     if (stock === 0) {
       return (
         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
           Out of Stock
-        </span>);
-
+        </span>
+      );
     }
     if (stock < 10) {
       return (
         <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
           Low Stock
-        </span>);
-
+        </span>
+      );
     }
     return (
       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
         In Stock
-      </span>);
-
+      </span>
+    );
   };
+
   return (
     <motion.div
       initial={{
@@ -39,7 +43,6 @@ export function Inventory() {
         y: 0
       }}
       className="p-6 lg:p-8 max-w-7xl mx-auto h-full flex flex-col">
-      
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
@@ -53,18 +56,22 @@ export function Inventory() {
           <div className="relative flex-1 sm:w-64">
             <Search
               className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              size={18} />
-            
+              size={18}
+              aria-hidden="true"
+            />
+
             <input
               type="text"
               placeholder="Search inventory..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm text-sm" />
-            
+              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm text-sm"
+            />
           </div>
-          <button className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-medium flex items-center transition-colors shadow-sm shadow-indigo-200 whitespace-nowrap text-sm">
-            <Plus size={18} className="mr-2" />
+          <button
+            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-medium flex items-center transition-colors shadow-sm shadow-indigo-200 whitespace-nowrap text-sm"
+            aria-label="Add new product">
+            <Plus size={18} className="mr-2" aria-hidden="true" />
             Add Product
           </button>
         </div>
@@ -83,18 +90,18 @@ export function Inventory() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {filteredProducts.map((product) =>
-              <tr
-                key={product.id}
-                className="hover:bg-slate-50/50 transition-colors group">
-                
+              {filteredProducts.map((product) => (
+                <tr
+                  key={product.id}
+                  className="hover:bg-slate-50/50 transition-colors group">
                   <td className="px-6 py-4 whitespace-nowrap">
                     <div className="flex items-center">
                       <img
-                      src={product.image}
-                      alt={product.name}
-                      className="w-10 h-10 rounded-lg object-cover border border-slate-100" />
-                    
+                        src={product.image}
+                        alt={product.name}
+                        className="w-10 h-10 rounded-lg object-cover border border-slate-100"
+                      />
+
                       <div className="ml-4">
                         <div className="text-sm font-medium text-slate-900">
                           {product.name}
@@ -124,30 +131,28 @@ export function Inventory() {
                   <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                     <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
-                      className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                      aria-label="Edit">
-                      
-                        <Edit2 size={16} />
+                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                        aria-label={`Edit ${product.name}`}>
+                        <Edit2 size={16} aria-hidden="true" />
                       </button>
                       <button
-                      className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                      aria-label="Delete">
-                      
-                        <Trash2 size={16} />
+                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        aria-label={`Delete ${product.name}`}>
+                        <Trash2 size={16} aria-hidden="true" />
                       </button>
                     </div>
                   </td>
                 </tr>
-              )}
+              ))}
             </tbody>
           </table>
-          {filteredProducts.length === 0 &&
-          <div className="p-12 text-center text-slate-500">
+          {filteredProducts.length === 0 && (
+            <div className="p-12 text-center text-slate-500">
               No products found matching your search.
             </div>
-          }
+          )}
         </div>
       </div>
-    </motion.div>);
-
+    </motion.div>
+  );
 }

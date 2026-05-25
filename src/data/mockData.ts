@@ -1,4 +1,4 @@
-import { Product, Transaction, Stat } from '../types';
+import type { Product, Transaction, Stat } from '../types';
 
 export const categories = ['All', 'Food', 'Drinks', 'Snacks', 'Desserts'];
 

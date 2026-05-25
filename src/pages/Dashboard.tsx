@@ -1,4 +1,3 @@
-import React from 'react';
 import { motion } from 'framer-motion';
 import {
   TrendingUp,
@@ -7,9 +6,11 @@ import {
   ShoppingBag,
   CreditCard,
   Activity,
-  Receipt } from
-'lucide-react';
+  Receipt
+} from 'lucide-react';
 import { mockStats, mockTransactions } from '../data/mockData';
+import type { Stat } from '../types';
+
 export function Dashboard() {
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -17,25 +18,30 @@ export function Dashboard() {
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
             Completed
-          </span>);
+          </span>
+        );
 
       case 'Pending':
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
             Pending
-          </span>);
+          </span>
+        );
 
       case 'Refunded':
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
             Refunded
-          </span>);
+          </span>
+        );
 
       default:
         return null;
     }
   };
+
   const icons = [DollarSign, ShoppingBag, CreditCard, Activity];
+
   return (
     <motion.div
       initial={{
@@ -47,7 +53,6 @@ export function Dashboard() {
         y: 0
       }}
       className="p-6 lg:p-8 max-w-7xl mx-auto space-y-8">
-      
       <div>
         <h1 className="text-2xl font-bold text-slate-900">Sales Dashboard</h1>
         <p className="text-slate-500 text-sm mt-1">
@@ -57,7 +62,7 @@ export function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
-        {mockStats.map((stat, index) => {
+        {mockStats.map((stat: Stat, index: number) => {
           const Icon = icons[index];
           const isPositive = stat.trend === 'up';
           return (
@@ -75,19 +80,19 @@ export function Dashboard() {
                 delay: index * 0.1
               }}
               className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
-              
               <div className="flex justify-between items-start">
                 <div className="w-10 h-10 rounded-xl bg-indigo-50 flex items-center justify-center text-indigo-600">
-                  <Icon size={20} />
+                  <Icon size={20} aria-hidden="true" />
                 </div>
                 <div
-                  className={`flex items-center text-sm font-medium ${isPositive ? 'text-emerald-600' : 'text-red-600'}`}>
-                  
-                  {isPositive ?
-                  <TrendingUp size={16} className="mr-1" /> :
-
-                  <TrendingDown size={16} className="mr-1" />
-                  }
+                  className={`flex items-center text-sm font-medium ${
+                    isPositive ? 'text-emerald-600' : 'text-red-600'
+                  }`}>
+                  {isPositive ? (
+                    <TrendingUp size={16} className="mr-1" aria-hidden="true" />
+                  ) : (
+                    <TrendingDown size={16} className="mr-1" aria-hidden="true" />
+                  )}
                   {Math.abs(stat.change)}%
                 </div>
               </div>
@@ -99,8 +104,8 @@ export function Dashboard() {
                   {stat.value}
                 </p>
               </div>
-            </motion.div>);
-
+            </motion.div>
+          );
         })}
       </div>
 
@@ -127,11 +132,10 @@ export function Dashboard() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {mockTransactions.map((tx) =>
-              <tr
-                key={tx.id}
-                className="hover:bg-slate-50/50 transition-colors">
-                
+              {mockTransactions.map((tx) => (
+                <tr
+                  key={tx.id}
+                  className="hover:bg-slate-50/50 transition-colors">
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
                     {tx.id}
                   </td>
@@ -149,16 +153,16 @@ export function Dashboard() {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-right">
                     <button className="inline-flex items-center justify-center px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
-                      <Receipt size={14} className="mr-2" />
+                      <Receipt size={14} className="mr-2" aria-hidden="true" />
                       Receipt
                     </button>
                   </td>
                 </tr>
-              )}
+              ))}
             </tbody>
           </table>
         </div>
       </div>
-    </motion.div>);
-
+    </motion.div>
+  );
 }
