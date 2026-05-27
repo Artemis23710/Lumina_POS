@@ -1,12 +1,70 @@
-import { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Search, Plus, Edit2, Trash2 } from 'lucide-react';
-import { mockProducts } from '../data/mockData';
+import { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Search, Plus, Edit2, Trash2, X } from 'lucide-react';
+import { collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, storage } from '../config/firebase';
+
+interface Product {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  stock: number;
+  image: string;
+}
+
+const CATEGORIES = ['Food', 'Drinks', 'Snacks', 'Desserts'];
 
 export function Inventory() {
   const [searchQuery, setSearchQuery] = useState('');
+  const [isFormOpen, setIsFormOpen] = useState(false);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [isFetchingProducts, setIsFetchingProducts] = useState(true);
+  const [formData, setFormData] = useState({
+    name: '',
+    category: CATEGORIES[0],
+    price: '',
+    stock: '',
+    image: ''
+  });
+  const [imagePreview, setImagePreview] = useState<string>('');
 
-  const filteredProducts = mockProducts.filter((product) =>
+  // Fetch products from Firestore on mount
+  useEffect(() => {
+    setIsFetchingProducts(true);
+    
+    try {
+      const q = query(
+        collection(db, 'products'),
+        orderBy('createdAt', 'desc')
+      );
+
+      const unsubscribe = onSnapshot(q, (snapshot) => {
+        const productsList: Product[] = [];
+        snapshot.forEach((doc) => {
+          productsList.push({
+            id: doc.id,
+            name: doc.data().name,
+            category: doc.data().category,
+            price: doc.data().price,
+            stock: doc.data().stock,
+            image: doc.data().image
+          } as Product);
+        });
+        setProducts(productsList);
+        setIsFetchingProducts(false);
+      });
+
+      return () => unsubscribe();
+    } catch (error) {
+      console.error('Error fetching products:', error);
+      setIsFetchingProducts(false);
+    }
+  }, []);
+
+  const filteredProducts = products.filter((product) =>
     product.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
@@ -32,127 +90,463 @@ export function Inventory() {
     );
   };
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    const { name, value } = e.target;
+    setFormData(prev => ({
+      ...prev,
+      [name]: value
+    }));
+  };
+
+  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      if (!file.type.startsWith('image/')) {
+        alert('Please select an image file');
+        return;
+      }
+
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Image size must be less than 5MB');
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        setFormData(prev => ({
+          ...prev,
+          image: result
+        }));
+        setImagePreview(result);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  // Helper function to convert base64 to File
+  function dataURLtoFile(dataurl: string, filename: string): File {
+    const arr = dataurl.split(',');
+    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
+    const bstr = atob(arr[1]);
+    let n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    while (n--) {
+      u8arr[n] = bstr.charCodeAt(n);
+    }
+    return new File([u8arr], filename, { type: mime });
+  }
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    
+    if (!formData.name || !formData.price || !formData.stock || !formData.image) {
+      alert('Please fill in all fields');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      // Step 1: Upload image to Firebase Storage
+      const imageFile = dataURLtoFile(formData.image, `${Date.now()}.jpg`);
+      const storageRef = ref(storage, `product-images/${Date.now()}_${formData.name}`);
+      const uploadedImage = await uploadBytes(storageRef, imageFile);
+      const imageURL = await getDownloadURL(uploadedImage.ref);
+
+      // Step 2: Save product data to Firestore
+      const newProductData = {
+        name: formData.name,
+        category: formData.category,
+        price: parseFloat(formData.price),
+        stock: parseInt(formData.stock),
+        image: imageURL,
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      };
+
+      const docRef = await addDoc(collection(db, 'products'), newProductData);
+
+      // Step 3: Reset form
+      setFormData({
+        name: '',
+        category: CATEGORIES[0],
+        price: '',
+        stock: '',
+        image: ''
+      });
+      setImagePreview('');
+      setIsFormOpen(false);
+
+      alert('Product added successfully!');
+    } catch (error) {
+      console.error('Error adding product:', error);
+      alert('Error adding product. Please try again.');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleDeleteProduct = async (productId: string, productName: string) => {
+    if (!window.confirm(`Are you sure you want to delete "${productName}"?`)) {
+      return;
+    }
+
+    try {
+      await deleteDoc(doc(db, 'products', productId));
+      alert('Product deleted successfully!');
+    } catch (error) {
+      console.error('Error deleting product:', error);
+      alert('Error deleting product. Please try again.');
+    }
+  };
+
   return (
-    <motion.div
-      initial={{
-        opacity: 0,
-        y: 10
-      }}
-      animate={{
-        opacity: 1,
-        y: 0
-      }}
-      className="p-6 lg:p-8 max-w-7xl mx-auto h-full flex flex-col">
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            Inventory Management
-          </h1>
-          <p className="text-slate-500 text-sm mt-1">
-            Manage your products, pricing, and stock levels.
-          </p>
+    <>
+      <motion.div
+        initial={{
+          opacity: 0,
+          y: 10
+        }}
+        animate={{
+          opacity: 1,
+          y: 0
+        }}
+        className="p-6 lg:p-8 max-w-7xl mx-auto h-full flex flex-col">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
+          <div>
+            <h1 className="text-2xl font-bold text-slate-900">
+              Inventory Management
+            </h1>
+            <p className="text-slate-500 text-sm mt-1">
+              Manage your products, pricing, and stock levels.
+            </p>
+          </div>
+          <div className="flex gap-3 w-full sm:w-auto">
+            <div className="relative flex-1 sm:w-64">
+              <Search
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
+                size={18}
+                aria-hidden="true"
+              />
+
+              <input
+                type="text"
+                placeholder="Search inventory..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm text-sm"
+              />
+            </div>
+            <button
+              onClick={() => setIsFormOpen(true)}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-medium flex items-center transition-colors shadow-sm shadow-indigo-200 whitespace-nowrap text-sm"
+              aria-label="Add new product">
+              <Plus size={18} className="mr-2" aria-hidden="true" />
+              Add Product
+            </button>
+          </div>
         </div>
-        <div className="flex gap-3 w-full sm:w-auto">
-          <div className="relative flex-1 sm:w-64">
-            <Search
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"
-              size={18}
+
+        <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex-1 flex flex-col">
+          <div className="overflow-x-auto flex-1">
+            {isFetchingProducts ? (
+              <div className="p-12 text-center text-slate-500">
+                <div className="inline-block">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+                </div>
+                <p className="mt-3">Loading products...</p>
+              </div>
+            ) : (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
+                    <th className="px-6 py-4 font-medium">Product</th>
+                    <th className="px-6 py-4 font-medium">Category</th>
+                    <th className="px-6 py-4 font-medium">Price</th>
+                    <th className="px-6 py-4 font-medium">Stock Level</th>
+                    <th className="px-6 py-4 font-medium text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredProducts.map((product) => (
+                    <tr
+                      key={product.id}
+                      className="hover:bg-slate-50/50 transition-colors group">
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center">
+                          <img
+                            src={product.image}
+                            alt={product.name}
+                            className="w-10 h-10 rounded-lg object-cover border border-slate-100"
+                          />
+
+                          <div className="ml-4">
+                            <div className="text-sm font-medium text-slate-900">
+                              {product.name}
+                            </div>
+                            <div className="text-xs text-slate-400">
+                              ID: {product.id.slice(0, 8)}...
+                            </div>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600">
+                          {product.category}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                        ${product.price.toFixed(2)}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm text-slate-600 w-8">
+                            {product.stock}
+                          </span>
+                          {getStockBadge(product.stock)}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                        <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <button
+                            className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
+                            aria-label={`Edit ${product.name}`}>
+                            <Edit2 size={16} aria-hidden="true" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProduct(product.id, product.name)}
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            aria-label={`Delete ${product.name}`}>
+                            <Trash2 size={16} aria-hidden="true" />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {!isFetchingProducts && filteredProducts.length === 0 && (
+              <div className="p-12 text-center text-slate-500">
+                {products.length === 0 ? 'No products yet. Add one to get started!' : 'No products found matching your search.'}
+              </div>
+            )}
+          </div>
+        </div>
+      </motion.div>
+
+      {/* Add Product Modal */}
+      <AnimatePresence>
+        {isFormOpen && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setIsFormOpen(false)}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
               aria-hidden="true"
             />
 
-            <input
-              type="text"
-              placeholder="Search inventory..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-white border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all shadow-sm text-sm"
-            />
-          </div>
-          <button
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-medium flex items-center transition-colors shadow-sm shadow-indigo-200 whitespace-nowrap text-sm"
-            aria-label="Add new product">
-            <Plus size={18} className="mr-2" aria-hidden="true" />
-            Add Product
-          </button>
-        </div>
-      </div>
+            {/* Modal */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              onClick={() => setIsFormOpen(false)}>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+                {/* Header */}
+                <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
+                  <h2 className="text-xl font-bold text-slate-900">Add New Product</h2>
+                  <button
+                    onClick={() => setIsFormOpen(false)}
+                    className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
+                    aria-label="Close form">
+                    <X size={20} aria-hidden="true" />
+                  </button>
+                </div>
 
-      <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden flex-1 flex flex-col">
-        <div className="overflow-x-auto flex-1">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
-                <th className="px-6 py-4 font-medium">Product</th>
-                <th className="px-6 py-4 font-medium">Category</th>
-                <th className="px-6 py-4 font-medium">Price</th>
-                <th className="px-6 py-4 font-medium">Stock Level</th>
-                <th className="px-6 py-4 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filteredProducts.map((product) => (
-                <tr
-                  key={product.id}
-                  className="hover:bg-slate-50/50 transition-colors group">
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <img
-                        src={product.image}
-                        alt={product.name}
-                        className="w-10 h-10 rounded-lg object-cover border border-slate-100"
-                      />
+                {/* Form Content */}
+                <form onSubmit={handleSubmit} className="p-6 space-y-5">
+                  {/* Product Name */}
+                  <div>
+                    <label htmlFor="name" className="block text-sm font-medium text-slate-700 mb-2">
+                      Product Name *
+                    </label>
+                    <input
+                      type="text"
+                      id="name"
+                      name="name"
+                      value={formData.name}
+                      onChange={handleInputChange}
+                      placeholder="e.g., Avocado Toast"
+                      disabled={isLoading}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm disabled:bg-slate-50 disabled:cursor-not-allowed"
+                    />
+                  </div>
 
-                      <div className="ml-4">
-                        <div className="text-sm font-medium text-slate-900">
-                          {product.name}
-                        </div>
-                        <div className="text-xs text-slate-400">
-                          ID: {product.id}
-                        </div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <span className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-slate-100 text-slate-600">
-                      {product.category}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                    ${product.price.toFixed(2)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    <div className="flex items-center gap-3">
-                      <span className="text-sm text-slate-600 w-8">
-                        {product.stock}
+                  {/* Category */}
+                  <div>
+                    <label htmlFor="category" className="block text-sm font-medium text-slate-700 mb-2">
+                      Category
+                    </label>
+                    <select
+                      id="category"
+                      name="category"
+                      value={formData.category}
+                      onChange={handleInputChange}
+                      disabled={isLoading}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm bg-white disabled:bg-slate-50 disabled:cursor-not-allowed">
+                      {CATEGORIES.map(cat => (
+                        <option key={cat} value={cat}>{cat}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Price */}
+                  <div>
+                    <label htmlFor="price" className="block text-sm font-medium text-slate-700 mb-2">
+                      Price (USD) *
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
+                        $
                       </span>
-                      {getStockBadge(product.stock)}
+                      <input
+                        type="number"
+                        id="price"
+                        name="price"
+                        value={formData.price}
+                        onChange={handleInputChange}
+                        placeholder="0.00"
+                        step="0.01"
+                        min="0"
+                        disabled={isLoading}
+                        className="w-full pl-8 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm disabled:bg-slate-50 disabled:cursor-not-allowed"
+                      />
                     </div>
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                    <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <button
-                        className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
-                        aria-label={`Edit ${product.name}`}>
-                        <Edit2 size={16} aria-hidden="true" />
-                      </button>
-                      <button
-                        className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
-                        aria-label={`Delete ${product.name}`}>
-                        <Trash2 size={16} aria-hidden="true" />
-                      </button>
+                  </div>
+
+                  {/* Stock */}
+                  <div>
+                    <label htmlFor="stock" className="block text-sm font-medium text-slate-700 mb-2">
+                      Stock Quantity *
+                    </label>
+                    <input
+                      type="number"
+                      id="stock"
+                      name="stock"
+                      value={formData.stock}
+                      onChange={handleInputChange}
+                      placeholder="e.g., 45"
+                      min="0"
+                      disabled={isLoading}
+                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 transition-all text-sm disabled:bg-slate-50 disabled:cursor-not-allowed"
+                    />
+                  </div>
+
+                  {/* Image Upload */}
+                  <div>
+                    <label htmlFor="image" className="block text-sm font-medium text-slate-700 mb-3">
+                      Product Image *
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="file"
+                        id="image"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        disabled={isLoading}
+                        className="hidden"
+                        aria-label="Upload product image"
+                      />
+                      <label
+                        htmlFor="image"
+                        className={`flex items-center justify-center w-full px-4 py-8 border-2 border-dashed border-slate-300 rounded-xl transition-all cursor-pointer group ${
+                          isLoading ? 'opacity-50 cursor-not-allowed' : 'hover:border-indigo-400 hover:bg-indigo-50/30'
+                        }`}>
+                        <div className="text-center">
+                          <div className="w-12 h-12 mx-auto mb-2 rounded-lg bg-slate-100 group-hover:bg-indigo-100 transition-colors flex items-center justify-center">
+                            <svg
+                              className="w-6 h-6 text-slate-400 group-hover:text-indigo-600 transition-colors"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24">
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M12 4v16m8-8H4"
+                              />
+                            </svg>
+                          </div>
+                          <p className="text-sm font-medium text-slate-700">
+                            Click to upload or drag and drop
+                          </p>
+                          <p className="text-xs text-slate-500 mt-1">
+                            PNG, JPG, GIF up to 5MB
+                          </p>
+                        </div>
+                      </label>
                     </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {filteredProducts.length === 0 && (
-            <div className="p-12 text-center text-slate-500">
-              No products found matching your search.
-            </div>
-          )}
-        </div>
-      </div>
-    </motion.div>
+
+                    {/* Image Preview */}
+                    {imagePreview && (
+                      <div className="mt-4 flex flex-col items-center gap-3">
+                        <img
+                          src={imagePreview}
+                          alt="Preview"
+                          className="w-24 h-24 rounded-lg object-cover border-2 border-indigo-200 shadow-sm"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setFormData(prev => ({ ...prev, image: '' }));
+                            setImagePreview('');
+                          }}
+                          disabled={isLoading}
+                          className="text-xs text-slate-500 hover:text-slate-700 underline disabled:cursor-not-allowed disabled:opacity-50">
+                          Remove image
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Form Actions */}
+                  <div className="flex gap-3 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setIsFormOpen(false)}
+                      disabled={isLoading}
+                      className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition-colors font-medium text-sm disabled:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400">
+                      Cancel
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex-1 px-4 py-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition-colors font-medium text-sm shadow-sm shadow-indigo-200 disabled:bg-indigo-400 disabled:cursor-not-allowed flex items-center justify-center gap-2">
+                      {isLoading ? (
+                        <>
+                          <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                          Adding...
+                        </>
+                      ) : (
+                        'Add Product'
+                      )}
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+    </>
   );
 }
