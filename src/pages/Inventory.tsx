@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, Edit2, Trash2, X } from 'lucide-react';
-import { collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, Timestamp } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { db, storage } from '../config/firebase';
+import { Search, Plus, Edit2, Trash2, X, CheckCircle, AlertCircle } from 'lucide-react';
+import { collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
+import { db } from '../config/firebase';
 
 interface Product {
   id: string;
@@ -14,14 +13,23 @@ interface Product {
   image: string;
 }
 
+interface SuccessAlert {
+  type: 'add' | 'update' | 'delete';
+  productName: string;
+}
+
 const CATEGORIES = ['Food', 'Drinks', 'Snacks', 'Desserts'];
 
 export function Inventory() {
   const [searchQuery, setSearchQuery] = useState('');
   const [isFormOpen, setIsFormOpen] = useState(false);
+  const [isDeleteConfirmOpen, setIsDeleteConfirmOpen] = useState(false);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isFetchingProducts, setIsFetchingProducts] = useState(true);
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [deleteConfirmData, setDeleteConfirmData] = useState<{ id: string; name: string } | null>(null);
+  const [successAlert, setSuccessAlert] = useState<SuccessAlert | null>(null);
   const [formData, setFormData] = useState({
     name: '',
     category: CATEGORIES[0],
@@ -30,6 +38,16 @@ export function Inventory() {
     image: ''
   });
   const [imagePreview, setImagePreview] = useState<string>('');
+
+  // Auto-hide success alert after 3 seconds
+  useEffect(() => {
+    if (successAlert) {
+      const timer = setTimeout(() => {
+        setSuccessAlert(null);
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [successAlert]);
 
   // Fetch products from Firestore on mount
   useEffect(() => {
@@ -124,18 +142,35 @@ export function Inventory() {
     }
   };
 
-  // Helper function to convert base64 to File
-  function dataURLtoFile(dataurl: string, filename: string): File {
-    const arr = dataurl.split(',');
-    const mime = arr[0].match(/:(.*?);/)?.[1] || 'image/jpeg';
-    const bstr = atob(arr[1]);
-    let n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    while (n--) {
-      u8arr[n] = bstr.charCodeAt(n);
-    }
-    return new File([u8arr], filename, { type: mime });
-  }
+  const resetForm = () => {
+    setFormData({
+      name: '',
+      category: CATEGORIES[0],
+      price: '',
+      stock: '',
+      image: ''
+    });
+    setImagePreview('');
+    setEditingProductId(null);
+  };
+
+  const handleAddClick = () => {
+    resetForm();
+    setIsFormOpen(true);
+  };
+
+  const handleEditClick = (product: Product) => {
+    setFormData({
+      name: product.name,
+      category: product.category,
+      price: product.price.toString(),
+      stock: product.stock.toString(),
+      image: product.image
+    });
+    setImagePreview(product.image);
+    setEditingProductId(product.id);
+    setIsFormOpen(true);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -148,53 +183,75 @@ export function Inventory() {
     setIsLoading(true);
 
     try {
-      // Step 1: Upload image to Firebase Storage
-      const imageFile = dataURLtoFile(formData.image, `${Date.now()}.jpg`);
-      const storageRef = ref(storage, `product-images/${Date.now()}_${formData.name}`);
-      const uploadedImage = await uploadBytes(storageRef, imageFile);
-      const imageURL = await getDownloadURL(uploadedImage.ref);
+      if (editingProductId) {
+        // Update existing product
+        const productRef = doc(db, 'products', editingProductId);
+        await updateDoc(productRef, {
+          name: formData.name,
+          category: formData.category,
+          price: parseFloat(formData.price),
+          stock: parseInt(formData.stock),
+          image: formData.image, // ← This will now update the image
+          updatedAt: Timestamp.now()
+        });
+        
+        // Show success alert
+        setSuccessAlert({
+          type: 'update',
+          productName: formData.name
+        });
+      } else {
+        // Add new product
+        const newProductData = {
+          name: formData.name,
+          category: formData.category,
+          price: parseFloat(formData.price),
+          stock: parseInt(formData.stock),
+          image: formData.image,
+          createdAt: Timestamp.now(),
+          updatedAt: Timestamp.now()
+        };
 
-      // Step 2: Save product data to Firestore
-      const newProductData = {
-        name: formData.name,
-        category: formData.category,
-        price: parseFloat(formData.price),
-        stock: parseInt(formData.stock),
-        image: imageURL,
-        createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now()
-      };
+        await addDoc(collection(db, 'products'), newProductData);
+        
+        // Show success alert
+        setSuccessAlert({
+          type: 'add',
+          productName: formData.name
+        });
+      }
 
-      const docRef = await addDoc(collection(db, 'products'), newProductData);
-
-      // Step 3: Reset form
-      setFormData({
-        name: '',
-        category: CATEGORIES[0],
-        price: '',
-        stock: '',
-        image: ''
-      });
-      setImagePreview('');
+      resetForm();
       setIsFormOpen(false);
-
-      alert('Product added successfully!');
     } catch (error) {
-      console.error('Error adding product:', error);
-      alert('Error adding product. Please try again.');
+      console.error('Error saving product:', error);
+      alert('Error saving product. Please try again.');
     } finally {
       setIsLoading(false);
     }
   };
 
-  const handleDeleteProduct = async (productId: string, productName: string) => {
-    if (!window.confirm(`Are you sure you want to delete "${productName}"?`)) {
-      return;
-    }
+  const handleDeleteClick = (productId: string, productName: string) => {
+    setDeleteConfirmData({ id: productId, name: productName });
+    setIsDeleteConfirmOpen(true);
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteConfirmData) return;
 
     try {
-      await deleteDoc(doc(db, 'products', productId));
-      alert('Product deleted successfully!');
+      const productName = deleteConfirmData.name;
+      await deleteDoc(doc(db, 'products', deleteConfirmData.id));
+      
+      setIsDeleteConfirmOpen(false);
+      
+      // Show success alert
+      setSuccessAlert({
+        type: 'delete',
+        productName: productName
+      });
+      
+      setDeleteConfirmData(null);
     } catch (error) {
       console.error('Error deleting product:', error);
       alert('Error deleting product. Please try again.');
@@ -239,7 +296,7 @@ export function Inventory() {
               />
             </div>
             <button
-              onClick={() => setIsFormOpen(true)}
+              onClick={handleAddClick}
               className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl font-medium flex items-center transition-colors shadow-sm shadow-indigo-200 whitespace-nowrap text-sm"
               aria-label="Add new product">
               <Plus size={18} className="mr-2" aria-hidden="true" />
@@ -279,6 +336,9 @@ export function Inventory() {
                             src={product.image}
                             alt={product.name}
                             className="w-10 h-10 rounded-lg object-cover border border-slate-100"
+                            onError={(e) => {
+                              e.currentTarget.src = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100"%3E%3Crect fill="%23e2e8f0" width="100" height="100"/%3E%3C/svg%3E';
+                            }}
                           />
 
                           <div className="ml-4">
@@ -310,12 +370,13 @@ export function Inventory() {
                       <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                         <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                           <button
+                            onClick={() => handleEditClick(product)}
                             className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"
                             aria-label={`Edit ${product.name}`}>
                             <Edit2 size={16} aria-hidden="true" />
                           </button>
                           <button
-                            onClick={() => handleDeleteProduct(product.id, product.name)}
+                            onClick={() => handleDeleteClick(product.id, product.name)}
                             className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                             aria-label={`Delete ${product.name}`}>
                             <Trash2 size={16} aria-hidden="true" />
@@ -336,7 +397,47 @@ export function Inventory() {
         </div>
       </motion.div>
 
-      {/* Add Product Modal */}
+      {/* Success Alert */}
+      <AnimatePresence>
+        {successAlert && (
+          <motion.div
+            initial={{ opacity: 0, y: -20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+            className="fixed top-4 right-4 z-50 max-w-sm">
+            <div className="bg-white rounded-xl shadow-lg border border-emerald-200 overflow-hidden">
+              <div className="bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-4 border-b border-emerald-200 flex items-start gap-3">
+                <div className="flex-shrink-0 mt-0.5">
+                  <CheckCircle className="h-5 w-5 text-emerald-600" />
+                </div>
+                <div className="flex-1">
+                  <h3 className="text-sm font-semibold text-slate-900">
+                    {successAlert.type === 'add' && 'Product Added Successfully'}
+                    {successAlert.type === 'update' && 'Product Updated Successfully'}
+                    {successAlert.type === 'delete' && 'Product Deleted Successfully'}
+                  </h3>
+                  <p className="text-sm text-slate-600 mt-1">
+                    {successAlert.type === 'add' && `"${successAlert.productName}" has been added to your inventory.`}
+                    {successAlert.type === 'update' && `"${successAlert.productName}" has been updated successfully.`}
+                    {successAlert.type === 'delete' && `"${successAlert.productName}" has been removed from your inventory.`}
+                  </p>
+                </div>
+              </div>
+              {/* Progress bar */}
+              <motion.div
+                initial={{ scaleX: 1 }}
+                animate={{ scaleX: 0 }}
+                transition={{ duration: 3, ease: 'linear' }}
+                className="h-1 bg-emerald-500 origin-left"
+                style={{ transformOrigin: 'left' }}
+              />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Add/Edit Product Modal */}
       <AnimatePresence>
         {isFormOpen && (
           <>
@@ -345,7 +446,10 @@ export function Inventory() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              onClick={() => setIsFormOpen(false)}
+              onClick={() => {
+                resetForm();
+                setIsFormOpen(false);
+              }}
               className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
               aria-hidden="true"
             />
@@ -357,15 +461,23 @@ export function Inventory() {
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
               transition={{ type: 'spring', damping: 20, stiffness: 300 }}
               className="fixed inset-0 z-50 flex items-center justify-center p-4"
-              onClick={() => setIsFormOpen(false)}>
+              onClick={() => {
+                resetForm();
+                setIsFormOpen(false);
+              }}>
               <div
                 onClick={(e) => e.stopPropagation()}
                 className="bg-white rounded-2xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto">
                 {/* Header */}
                 <div className="sticky top-0 bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-slate-900">Add New Product</h2>
+                  <h2 className="text-xl font-bold text-slate-900">
+                    {editingProductId ? 'Edit Product' : 'Add New Product'}
+                  </h2>
                   <button
-                    onClick={() => setIsFormOpen(false)}
+                    onClick={() => {
+                      resetForm();
+                      setIsFormOpen(false);
+                    }}
                     className="p-2 hover:bg-slate-100 rounded-lg transition-colors text-slate-400 hover:text-slate-600"
                     aria-label="Close form">
                     <X size={20} aria-hidden="true" />
@@ -454,7 +566,7 @@ export function Inventory() {
                   {/* Image Upload */}
                   <div>
                     <label htmlFor="image" className="block text-sm font-medium text-slate-700 mb-3">
-                      Product Image *
+                      Product Image * {editingProductId && <span className="text-xs text-slate-500">(Upload new image to change)</span>}
                     </label>
                     <div className="relative">
                       <input
@@ -522,7 +634,10 @@ export function Inventory() {
                   <div className="flex gap-3 pt-4">
                     <button
                       type="button"
-                      onClick={() => setIsFormOpen(false)}
+                      onClick={() => {
+                        resetForm();
+                        setIsFormOpen(false);
+                      }}
                       disabled={isLoading}
                       className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-50 transition-colors font-medium text-sm disabled:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400">
                       Cancel
@@ -534,14 +649,87 @@ export function Inventory() {
                       {isLoading ? (
                         <>
                           <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
-                          Adding...
+                          {editingProductId ? 'Updating...' : 'Adding...'}
                         </>
                       ) : (
-                        'Add Product'
+                        editingProductId ? 'Update Product' : 'Add Product'
                       )}
                     </button>
                   </div>
                 </form>
+              </div>
+            </motion.div>
+          </>
+        )}
+      </AnimatePresence>
+
+      {/* Delete Confirmation Modal */}
+      <AnimatePresence>
+        {isDeleteConfirmOpen && deleteConfirmData && (
+          <>
+            {/* Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => {
+                setIsDeleteConfirmOpen(false);
+                setDeleteConfirmData(null);
+              }}
+              className="fixed inset-0 bg-black/50 backdrop-blur-sm z-40"
+              aria-hidden="true"
+            />
+
+            {/* Confirmation Modal */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+              className="fixed inset-0 z-50 flex items-center justify-center p-4"
+              onClick={() => {
+                setIsDeleteConfirmOpen(false);
+                setDeleteConfirmData(null);
+              }}>
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="bg-white rounded-2xl shadow-2xl w-full max-w-sm overflow-hidden">
+                {/* Header */}
+                <div className="bg-gradient-to-r from-red-50 to-red-100 px-6 py-4 border-b border-red-200">
+                  <div className="flex items-center gap-3">
+                    <div className="w-12 h-12 rounded-full bg-red-200 flex items-center justify-center">
+                      <Trash2 className="text-red-600" size={24} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-bold text-slate-900">Delete Product?</h3>
+                      <p className="text-sm text-slate-600">This action cannot be undone.</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Content */}
+                <div className="px-6 py-4">
+                  <p className="text-slate-700">
+                    Are you sure you want to delete <span className="font-bold text-slate-900">"{deleteConfirmData.name}"</span>? This product will be permanently removed from your inventory.
+                  </p>
+                </div>
+
+                {/* Actions */}
+                <div className="bg-slate-50 px-6 py-4 border-t border-slate-200 flex gap-3">
+                  <button
+                    onClick={() => {
+                      setIsDeleteConfirmOpen(false);
+                      setDeleteConfirmData(null);
+                    }}
+                    className="flex-1 px-4 py-2.5 border border-slate-200 text-slate-700 rounded-xl hover:bg-slate-100 transition-colors font-medium text-sm">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleConfirmDelete}
+                    className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors font-medium text-sm shadow-sm shadow-red-200">
+                    Delete
+                  </button>
+                </div>
               </div>
             </motion.div>
           </>
