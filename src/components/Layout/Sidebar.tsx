@@ -9,10 +9,10 @@ import {
 
 export function Sidebar() {
   const navItems = [
-    {
-      path: '/checkout',
-      icon: ShoppingCart,
-      label: 'Checkout'
+     {
+      path: '/dashboard',
+      icon: LayoutGrid,
+      label: 'Dashboard'
     },
     {
       path: '/inventory',
@@ -20,9 +20,9 @@ export function Sidebar() {
       label: 'Inventory'
     },
     {
-      path: '/dashboard',
-      icon: LayoutGrid,
-      label: 'Dashboard'
+      path: '/checkout',
+      icon: ShoppingCart,
+      label: 'Checkout'
     }
   ];
 

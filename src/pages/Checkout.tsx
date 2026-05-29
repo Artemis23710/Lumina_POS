@@ -1,19 +1,79 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { Search } from 'lucide-react';
 import { toast } from 'sonner';
-import { mockProducts, categories } from '../data/mockData';
-import type { Product, CartItem } from '../types';
+import { collection, getDocs, query, orderBy, addDoc, Timestamp } from 'firebase/firestore';
+import { db } from '../config/firebase';
+import type { CartItem } from '../types';
 import { ProductCard } from '../components/Checkout/ProductCard';
 import { CartPanel } from '../components/Checkout/CartPanel';
+
+interface Product {
+  id: string;
+  name: string;
+  category: string;
+  price: number;
+  stock: number;
+  image: string;
+}
+
+interface OrderItem {
+  productId: string;
+  productName: string;
+  category: string;
+  price: number;
+  quantity: number;
+  subtotal: number;
+}
 
 export function Checkout() {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeCategory, setActiveCategory] = useState('All');
   const [cartItems, setCartItems] = useState<CartItem[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
+  const [categories, setCategories] = useState<string[]>(['All']);
+  const [isLoadingProducts, setIsLoadingProducts] = useState(true);
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  // Fetch products from Firestore
+  useEffect(() => {
+    const fetchProducts = async () => {
+      try {
+        setIsLoadingProducts(true);
+        const q = query(collection(db, 'products'), orderBy('createdAt', 'desc'));
+        const snapshot = await getDocs(q);
+        
+        const productsList: Product[] = [];
+        const categoriesSet = new Set<string>(['All']);
+        
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          productsList.push({
+            id: doc.id,
+            name: data.name,
+            category: data.category,
+            price: data.price,
+            stock: data.stock,
+            image: data.image
+          });
+          categoriesSet.add(data.category);
+        });
+        
+        setProducts(productsList);
+        setCategories(Array.from(categoriesSet));
+      } catch (error) {
+        console.error('Error fetching products:', error);
+        toast.error('Failed to load products');
+      } finally {
+        setIsLoadingProducts(false);
+      }
+    };
+
+    fetchProducts();
+  }, []);
 
   const filteredProducts = useMemo(() => {
-    return mockProducts.filter((product) => {
+    return products.filter((product) => {
       const matchesSearch = product.name
         .toLowerCase()
         .includes(searchQuery.toLowerCase());
@@ -21,9 +81,21 @@ export function Checkout() {
         activeCategory === 'All' || product.category === activeCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [searchQuery, activeCategory]);
+  }, [searchQuery, activeCategory, products]);
 
   const handleAddToCart = (product: Product) => {
+    // Check stock availability
+    const cartQuantity = cartItems
+      .filter(item => item.product.id === product.id)
+      .reduce((sum, item) => sum + item.quantity, 0);
+
+    if (cartQuantity >= product.stock) {
+      toast.error('Not enough stock', {
+        description: `Only ${product.stock} items available`
+      });
+      return;
+    }
+
     setCartItems((prev) => {
       const existing = prev.find((item) => item.product.id === product.id);
       if (existing) {
@@ -43,6 +115,10 @@ export function Checkout() {
           quantity: 1
         }
       ];
+    });
+    
+    toast.success('Added to cart', {
+      description: `${product.name} added to your cart`
     });
   };
 
@@ -64,21 +140,86 @@ export function Checkout() {
   };
 
   const handleRemoveItem = (id: string) => {
+    const product = cartItems.find(item => item.product.id === id)?.product;
     setCartItems((prev) => prev.filter((item) => item.product.id !== id));
+    if (product) {
+      toast.success('Removed from cart', {
+        description: `${product.name} removed from your cart`
+      });
+    }
   };
 
-  const handleCheckout = () => {
-    const total = cartItems.reduce(
-      (sum, item) => sum + item.product.price * item.quantity,
-      0
+  const handleCheckout = async () => {
+    if (cartItems.length === 0) {
+      toast.error('Cart is empty', {
+        description: 'Add items to your cart before checking out'
+      });
+      return;
+    }
+
+    setIsProcessing(true);
+
+    try {
+      // Calculate totals
+      const subtotal = cartItems.reduce(
+        (sum, item) => sum + item.product.price * item.quantity,
+        0
+      );
+      const tax = subtotal * 0.08;
+      const total = subtotal + tax;
+
+      // Prepare order items
+      const orderItems: OrderItem[] = cartItems.map((item) => ({
+        productId: item.product.id,
+        productName: item.product.name,
+        category: item.product.category,
+        price: item.product.price,
+        quantity: item.quantity,
+        subtotal: item.product.price * item.quantity
+      }));
+
+      // Save order to Firestore
+      const orderRef = await addDoc(collection(db, 'orders'), {
+        items: orderItems,
+        subtotal: subtotal,
+        tax: tax,
+        total: total,
+        itemCount: cartItems.reduce((sum, item) => sum + item.quantity, 0),
+        status: 'completed',
+        createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now()
+      });
+
+      // Success
+      toast.success('Payment successful!', {
+        description: `Order #${orderRef.id.slice(0, 8).toUpperCase()} completed for $${total.toFixed(2)}`
+      });
+
+      // Clear cart
+      setCartItems([]);
+    } catch (error) {
+      console.error('Error processing checkout:', error);
+      toast.error('Checkout failed', {
+        description: 'Please try again'
+      });
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  if (isLoadingProducts) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="flex items-center justify-center h-full w-full">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
+          <p className="text-slate-600">Loading products...</p>
+        </div>
+      </motion.div>
     );
-    const totalWithTax = total * 1.08;
-
-    toast.success('Payment successful!', {
-      description: `Order completed for $${totalWithTax.toFixed(2)}`
-    });
-    setCartItems([]);
-  };
+  }
 
   return (
     <motion.div
@@ -129,19 +270,24 @@ export function Checkout() {
 
         {/* Product Grid */}
         <div className="flex-1 overflow-y-auto p-6 pt-2">
-          <motion.div layout className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
-            {filteredProducts.map((product) => (
-              <ProductCard
-                key={product.id}
-                product={product}
-                onAdd={handleAddToCart}
-              />
-            ))}
-          </motion.div>
-          {filteredProducts.length === 0 && (
+          {filteredProducts.length > 0 ? (
+            <motion.div layout className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4">
+              {filteredProducts.map((product) => (
+                <ProductCard
+                  key={product.id}
+                  product={product}
+                  onAdd={handleAddToCart}
+                />
+              ))}
+            </motion.div>
+          ) : (
             <div className="h-full flex flex-col items-center justify-center text-slate-400">
               <Search size={48} className="mb-4 opacity-20" />
-              <p>No products found matching your search.</p>
+              <p>
+                {products.length === 0
+                  ? 'No products available. Please add products in inventory.'
+                  : 'No products found matching your search.'}
+              </p>
             </div>
           )}
         </div>
@@ -153,6 +299,7 @@ export function Checkout() {
         onUpdateQuantity={handleUpdateQuantity}
         onRemove={handleRemoveItem}
         onCheckout={handleCheckout}
+        isProcessing={isProcessing}
       />
     </motion.div>
   );

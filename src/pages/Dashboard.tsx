@@ -1,4 +1,5 @@
 import { motion } from 'framer-motion';
+import { useState, useEffect } from 'react';
 import {
   TrendingUp,
   TrendingDown,
@@ -8,13 +9,95 @@ import {
   Activity,
   Receipt
 } from 'lucide-react';
-import { mockStats, mockTransactions } from '../data/mockData';
+import { collection, query, getDocs, orderBy } from 'firebase/firestore';
+import { db } from '../config/firebase';
 import type { Stat } from '../types';
 
+interface Order {
+  id: string;
+  items: Array<{
+    productName: string;
+    quantity: number;
+    price: number;
+  }>;
+  subtotal: number;
+  tax: number;
+  total: number;
+  itemCount: number;
+  status: string;
+  createdAt: any;
+}
+
+interface DashboardStats {
+  totalRevenue: number;
+  totalOrders: number;
+  averageOrderValue: number;
+  totalItems: number;
+}
+
 export function Dashboard() {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [stats, setStats] = useState<DashboardStats>({
+    totalRevenue: 0,
+    totalOrders: 0,
+    averageOrderValue: 0,
+    totalItems: 0
+  });
+  const [isLoading, setIsLoading] = useState(true);
+
+  // Fetch orders from Firestore
+  useEffect(() => {
+    const fetchOrders = async () => {
+      try {
+        setIsLoading(true);
+        const q = query(collection(db, 'orders'), orderBy('createdAt', 'desc'));
+        const snapshot = await getDocs(q);
+
+        const ordersList: Order[] = [];
+        snapshot.forEach((doc) => {
+          const data = doc.data();
+          ordersList.push({
+            id: doc.id,
+            items: data.items,
+            subtotal: data.subtotal,
+            tax: data.tax,
+            total: data.total,
+            itemCount: data.itemCount,
+            status: data.status,
+            createdAt: data.createdAt
+          });
+        });
+
+        setOrders(ordersList);
+
+        // Calculate stats
+        if (ordersList.length > 0) {
+          const totalRevenue = ordersList.reduce((sum, order) => sum + order.total, 0);
+          const totalOrders = ordersList.length;
+          const averageOrderValue = totalRevenue / totalOrders;
+          const totalItems = ordersList.reduce((sum, order) => sum + order.itemCount, 0);
+
+          setStats({
+            totalRevenue,
+            totalOrders,
+            averageOrderValue,
+            totalItems
+          });
+        }
+      } catch (error) {
+        console.error('Error fetching orders:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchOrders();
+  }, []);
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'Completed':
+      case 'completed':
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800">
             Completed
@@ -22,6 +105,7 @@ export function Dashboard() {
         );
 
       case 'Pending':
+      case 'pending':
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-800">
             Pending
@@ -29,6 +113,7 @@ export function Dashboard() {
         );
 
       case 'Refunded':
+      case 'refunded':
         return (
           <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800">
             Refunded
@@ -36,11 +121,72 @@ export function Dashboard() {
         );
 
       default:
-        return null;
+        return (
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-800">
+            {status}
+          </span>
+        );
     }
   };
 
+  const formatDate = (timestamp: any) => {
+    if (!timestamp) return 'N/A';
+    try {
+      const date = timestamp.toDate ? timestamp.toDate() : new Date(timestamp);
+      return date.toLocaleDateString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      });
+    } catch {
+      return 'N/A';
+    }
+  };
+
+  const dashboardStats: Stat[] = [
+    {
+      label: 'Total Revenue',
+      value: `$${stats.totalRevenue.toFixed(2)}`,
+      change: 12,
+      trend: 'up'
+    },
+    {
+      label: 'Total Orders',
+      value: stats.totalOrders.toString(),
+      change: 8,
+      trend: 'up'
+    },
+    {
+      label: 'Average Order',
+      value: `$${stats.averageOrderValue.toFixed(2)}`,
+      change: 4,
+      trend: 'up'
+    },
+    {
+      label: 'Total Items Sold',
+      value: stats.totalItems.toString(),
+      change: 15,
+      trend: 'up'
+    }
+  ];
+
   const icons = [DollarSign, ShoppingBag, CreditCard, Activity];
+
+  if (isLoading) {
+    return (
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        className="p-6 lg:p-8 max-w-7xl mx-auto h-full flex items-center justify-center">
+        <div className="text-center">
+          <div className="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4"></div>
+          <p className="text-slate-600">Loading dashboard data...</p>
+        </div>
+      </motion.div>
+    );
+  }
 
   return (
     <motion.div
@@ -62,7 +208,7 @@ export function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6">
-        {mockStats.map((stat: Stat, index: number) => {
+        {dashboardStats.map((stat: Stat, index: number) => {
           const Icon = icons[index];
           const isPositive = stat.trend === 'up';
           return (
@@ -113,54 +259,62 @@ export function Dashboard() {
       <div className="bg-white border border-slate-200 rounded-2xl shadow-sm overflow-hidden">
         <div className="p-6 border-b border-slate-100 flex justify-between items-center">
           <h2 className="text-lg font-semibold text-slate-900">
-            Recent Transactions
+            Recent Orders
           </h2>
-          <button className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
-            View All
-          </button>
+          <div className="text-sm text-slate-600">
+            {orders.length} total orders
+          </div>
         </div>
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
-                <th className="px-6 py-4 font-medium">Order ID</th>
-                <th className="px-6 py-4 font-medium">Date & Time</th>
-                <th className="px-6 py-4 font-medium">Items</th>
-                <th className="px-6 py-4 font-medium">Total Amount</th>
-                <th className="px-6 py-4 font-medium">Status</th>
-                <th className="px-6 py-4 font-medium text-right">Action</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {mockTransactions.map((tx) => (
-                <tr
-                  key={tx.id}
-                  className="hover:bg-slate-50/50 transition-colors">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                    {tx.id}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
-                    {tx.date}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
-                    {tx.items} {tx.items === 1 ? 'item' : 'items'}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
-                    ${tx.total.toFixed(2)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap">
-                    {getStatusBadge(tx.status)}
-                  </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-right">
-                    <button className="inline-flex items-center justify-center px-3 py-1.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 transition-colors">
-                      <Receipt size={14} className="mr-2" aria-hidden="true" />
-                      Receipt
-                    </button>
-                  </td>
+          {orders.length > 0 ? (
+            <table className="w-full text-left border-collapse">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 text-xs uppercase tracking-wider">
+                  <th className="px-6 py-4 font-medium">Order ID</th>
+                  <th className="px-6 py-4 font-medium">Date & Time</th>
+                  <th className="px-6 py-4 font-medium">Items</th>
+                  <th className="px-6 py-4 font-medium">Subtotal</th>
+                  <th className="px-6 py-4 font-medium">Tax</th>
+                  <th className="px-6 py-4 font-medium">Total Amount</th>
+                  <th className="px-6 py-4 font-medium">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {orders.map((order) => (
+                  <tr
+                    key={order.id}
+                    className="hover:bg-slate-50/50 transition-colors">
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                      #{order.id.slice(0, 8).toUpperCase()}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-500">
+                      {formatDate(order.createdAt)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
+                      {order.itemCount} {order.itemCount === 1 ? 'item' : 'items'}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
+                      ${order.subtotal.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-900">
+                      ${order.tax.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-slate-900">
+                      ${order.total.toFixed(2)}
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap">
+                      {getStatusBadge(order.status)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <div className="p-12 text-center text-slate-500">
+              <ShoppingBag className="mx-auto mb-4 opacity-20" size={48} />
+              <p>No orders yet. Start selling to see orders here!</p>
+            </div>
+          )}
         </div>
       </div>
     </motion.div>
