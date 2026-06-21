@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, Plus, Edit2, Trash2, X, CheckCircle, AlertCircle } from 'lucide-react';
-import { collection, addDoc, deleteDoc, doc, query, orderBy, onSnapshot, Timestamp, updateDoc } from 'firebase/firestore';
-import { db } from '../config/firebase';
+import { Search, Plus, Edit2, Trash2, X, CheckCircle } from 'lucide-react';
+import { dbService } from '../services/dbService';
 
 interface Product {
   id: string;
@@ -49,37 +48,20 @@ export function Inventory() {
     }
   }, [successAlert]);
 
-  // Fetch products from Firestore on mount
-  useEffect(() => {
-    setIsFetchingProducts(true);
-    
+  const fetchProducts = async () => {
     try {
-      const q = query(
-        collection(db, 'products'),
-        orderBy('createdAt', 'desc')
-      );
-
-      const unsubscribe = onSnapshot(q, (snapshot) => {
-        const productsList: Product[] = [];
-        snapshot.forEach((doc) => {
-          productsList.push({
-            id: doc.id,
-            name: doc.data().name,
-            category: doc.data().category,
-            price: doc.data().price,
-            stock: doc.data().stock,
-            image: doc.data().image
-          } as Product);
-        });
-        setProducts(productsList);
-        setIsFetchingProducts(false);
-      });
-
-      return () => unsubscribe();
+      setIsFetchingProducts(true);
+      const list = await dbService.getProducts();
+      setProducts(list);
     } catch (error) {
       console.error('Error fetching products:', error);
+    } finally {
       setIsFetchingProducts(false);
     }
+  };
+
+  useEffect(() => {
+    fetchProducts();
   }, []);
 
   const filteredProducts = products.filter((product) =>
@@ -183,46 +165,24 @@ export function Inventory() {
     setIsLoading(true);
 
     try {
-      if (editingProductId) {
-        // Update existing product
-        const productRef = doc(db, 'products', editingProductId);
-        await updateDoc(productRef, {
-          name: formData.name,
-          category: formData.category,
-          price: parseFloat(formData.price),
-          stock: parseInt(formData.stock),
-          image: formData.image, // ← This will now update the image
-          updatedAt: Timestamp.now()
-        });
-        
-        // Show success alert
-        setSuccessAlert({
-          type: 'update',
-          productName: formData.name
-        });
-      } else {
-        // Add new product
-        const newProductData = {
-          name: formData.name,
-          category: formData.category,
-          price: parseFloat(formData.price),
-          stock: parseInt(formData.stock),
-          image: formData.image,
-          createdAt: Timestamp.now(),
-          updatedAt: Timestamp.now()
-        };
+      const productData = {
+        name: formData.name,
+        category: formData.category,
+        price: parseFloat(formData.price),
+        stock: parseInt(formData.stock),
+        image: formData.image
+      };
 
-        await addDoc(collection(db, 'products'), newProductData);
-        
-        // Show success alert
-        setSuccessAlert({
-          type: 'add',
-          productName: formData.name
-        });
-      }
+      await dbService.saveProduct(productData, editingProductId);
+      
+      setSuccessAlert({
+        type: editingProductId ? 'update' : 'add',
+        productName: formData.name
+      });
 
       resetForm();
       setIsFormOpen(false);
+      fetchProducts();
     } catch (error) {
       console.error('Error saving product:', error);
       alert('Error saving product. Please try again.');
@@ -241,17 +201,17 @@ export function Inventory() {
 
     try {
       const productName = deleteConfirmData.name;
-      await deleteDoc(doc(db, 'products', deleteConfirmData.id));
+      await dbService.deleteProduct(deleteConfirmData.id);
       
       setIsDeleteConfirmOpen(false);
       
-      // Show success alert
       setSuccessAlert({
         type: 'delete',
         productName: productName
       });
       
       setDeleteConfirmData(null);
+      fetchProducts();
     } catch (error) {
       console.error('Error deleting product:', error);
       alert('Error deleting product. Please try again.');
